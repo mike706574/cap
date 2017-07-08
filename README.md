@@ -1,6 +1,6 @@
 # cap
 
-A simple single-page application using [re-frame](https://github.com/Day8/re-frame). Uses [doo](https://github.com/bensu/doo) for testing.
+A project.
 
 ## Copyright and License
 

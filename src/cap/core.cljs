@@ -1,41 +1,20 @@
 (ns cap.core
-  (:require [ajax.core :as ajax]
-            [clojure.string :as str]
+  (:require [cap.events]
+            [cap.subs]
+            [cap.views]
+            [day8.re-frame.async-flow-fx]
             [day8.re-frame.http-fx]
-            [reagent.core :as reagent]
-            [re-frame.core :as rf]))
+            [devtools.core :as devtools]
+            [goog.events :as events]
+            [reagent.core :as r]
+            [re-frame.core :as rf]
+            [taoensso.timbre :as log]))
 
-;; -- Development --------------------------------------------------------------
+(devtools/install!)
 (enable-console-print!)
-
-;; -- Event Dispatch -----------------------------------------------------------
-
-
-;; -- Event Handlers -----------------------------------------------------------
-
-(rf/reg-event-fx
- :initialize
- (fn [_ _]
-   {:db {:name "Bob"}}))
-
-
-;; -- Query  -------------------------------------------------------------------
-
-(rf/reg-sub
- :name
- (fn [db _]
-   (:name db)))
-
-;; -- View Functions -----------------------------------------------------------
-
-(defn app
-  []
-  [:div
-   [:p "Hello, " @(rf/subscribe [:name]) "!"]])
-
-;; -- Entry Point -------------------------------------------------------------
+(log/set-level! :debug)
 
 (defn ^:export run
   []
-  (rf/dispatch-sync [:initialize])
-  (reagent/render [app] (js/document.getElementById "app")))
+  (rf/dispatch-sync [:boot])
+  (r/render [cap.views/app] (js/document.getElementById "app")))
