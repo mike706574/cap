@@ -3,7 +3,10 @@
             [cemerick.url :as url]
             [clojure.spec.alpha :as s]
             [re-frame.core :as rf]
-            [re-frame.interceptor :refer [assoc-effect ->interceptor]]
+            [re-frame.interceptor :refer [->interceptor
+                                          assoc-effect
+                                          get-effect
+                                          get-coeffect]]
             [taoensso.timbre :as log]))
 
 (s/def :cap/category (s/or :nil nil? :keyword keyword?))
@@ -15,21 +18,15 @@
                 :cap/category]))
 
 (s/def :cap/error map?)
-(s/def :cap/context string?)
+(s/def :cap/error-context string?)
 
 (defmethod db-status :error [_]
   (s/keys :req [:cap/status
-                :cap/context
-                :cap/error]))
+                :cap/error-context
+                :cap/error-data]
+          :opt [:cap/error-event]))
 
 (s/def :cap/db (s/multi-spec db-status :cap/status))
-
-(defn check-and-throw
-  "throw an exception if db doesn't match the spec"
-  [a-spec db]
-  (when-not (s/valid? a-spec db)
-    (cljs.pprint/pprint db)
-    (throw (ex-info (str "spec check failed: " (s/explain-str a-spec db)) {}))))
 
 (defn spec-interceptor
   [spec f]
@@ -37,24 +34,22 @@
    :id :spec
    :after (fn spec-validation
             [context]
-            (let [db (get-in context [:effects :db])]
+            (let [event (get-coeffect context :event)
+                  db (or (get-effect context :db)
+                         (get-coeffect context :db))]
               (if (s/valid? spec db)
                 context
-                (let [updated-context (-> context
-                                          (assoc-effect :db db)
-                                          (assoc :queue #queue []))]
-                  (println (str "spec check failed: " (s/explain-str spec db)) {})
-                  (cljs.pprint/pprint (dissoc updated-context :queue :stack
-                                              ))
-                  updated-context))))))
+                (->> (f db event (s/explain-data spec db))
+                     (assoc-effect context :db)))))))
 
-(def my-spec-interceptor
-  (spec-interceptor
-   :cap/db
-   (fn [db event data]
-     (merge db {:cap/status :error
-                :cap/context (str " handling event " event)
-                :cap/error data}))))
+(defn handle-invalid-db
+  [db event data]
+  (merge db {:cap/status :error
+             :cap/error-context (str " validating db after " (first event))
+             :cap/error-event event
+             :cap/error-data data}))
+
+(def my-spec-interceptor (spec-interceptor :cap/db handle-invalid-db))
 
 (def interceptors [my-spec-interceptor rf/debug])
 
@@ -75,16 +70,18 @@
 
 (rf/reg-event-db
  :token-success
+ interceptors
  (fn [db [_ token]]
    (log/debug "Retrieved token:" token)
    (assoc db :cap/token token)))
 
 (rf/reg-event-db
  :token-failure
+ interceptors
  (fn [db [_ failure]]
    {:cap/status :error
-    :cap/context "fetching token."
-    :cap/error failure}))
+    :cap/error-context "fetching token."
+    :cap/error-data failure}))
 
 (rf/reg-event-db
  :set-category

@@ -4,17 +4,15 @@
 (rf/reg-sub
  :status
  (fn [db _]
+   (println "DB:" db)
    (:cap/status db)))
 
 (rf/reg-sub
- :error-data
+ :error
  (fn [db _]
-   (:cap/error db)))
-
-(rf/reg-sub
- :error-context
- (fn [db _]
-   (:cap/context db)))
+   (select-keys db [:cap/error-context
+                    :cap/error-data
+                    :cap/error-event])))
 
 (rf/reg-sub
  :category
