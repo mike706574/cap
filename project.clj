@@ -1,7 +1,7 @@
 (defproject org.clojars.mike706574/cap "0.0.1-SNAPSHOT"
   :description "A project."
   :url "https://github.com/mike706574/cap"
-  :license {:name "Eclipse Public License - v 1.0"
+  :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"
             :distribution :repo
             :comments "same as Clojure"}
@@ -11,13 +11,16 @@
                  [org.clojure/clojurescript "1.9.671"]
                  [com.stuartsierra/component "0.3.2"]
                  [com.taoensso/timbre "4.10.0"]
+                 [com.cognitect/transit-cljs "0.8.239"]
                  [reagent "0.7.0"]
                  [re-frame "0.9.4"]
                  [day8.re-frame/http-fx "0.1.3"]
                  [day8.re-frame/async-flow-fx "0.0.7"]
                  [cljs-ajax "0.6.0"]
                  [binaryage/devtools "0.9.4"]
-                 [com.cemerick/url "0.1.1"]]
+                 [com.cemerick/url "0.1.1"]
+                 [org.clojars.mike706574/bottle "0.0.1-SNAPSHOT"]
+                 [org.clojars.mike706574/re-frame-spec-interceptor "0.1.0-SNAPSHOT"]]
   :plugins [[lein-cljsbuild "1.1.5"]
             [lein-doo "0.1.7"]
             [lein-figwheel "0.5.10"]]

@@ -8,7 +8,8 @@
             [goog.events :as events]
             [reagent.core :as r]
             [re-frame.core :as rf]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log]
+            [clojure.spec.alpha :as s]))
 
 (devtools/install!)
 (enable-console-print!)

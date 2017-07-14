@@ -4,7 +4,6 @@
 (rf/reg-sub
  :status
  (fn [db _]
-   (println "DB:" db)
    (:cap/status db)))
 
 (rf/reg-sub
@@ -18,3 +17,8 @@
  :category
  (fn [db _]
    (:cap/category db)))
+
+(rf/reg-sub
+ :events
+ (fn [db _]
+   (:cap/events db)))

@@ -1,21 +1,54 @@
 (ns cap.events
   (:require [ajax.core :as ajax]
+            [bottle.specs]
             [cemerick.url :as url]
             [clojure.spec.alpha :as s]
+            [clojure.string :as str]
+            [cognitect.transit :as transit]
             [re-frame.core :as rf]
-            [re-frame.interceptor :refer [->interceptor
-                                          assoc-effect
-                                          get-effect
-                                          get-coeffect]]
+            [re-frame.spec-interceptor :refer [spec-interceptor]]
             [taoensso.timbre :as log]))
 
-(s/def :cap/category (s/or :nil nil? :keyword keyword?))
+;; Config
+
+(def token-url "http://localhost:8001/api/tokens")
+(def events-url "http://localhost:8001/api/events")
+(def websocket-url "ws://localhost:8001/api/websocket")
+
+;; Effects
+
+(defn websocket-effect
+  [{:as request
+    :keys [uri on-message on-error on-success on-failure]}]
+  (let [socket (js/WebSocket. uri)]
+    (set! (.-onmessage socket) #(rf/dispatch (conj on-message %)))
+    (set! (.-onerror socket) #(rf/dispatch (conj on-failure %)))
+    (set! (.-onopen socket) (fn on-open []
+                              (set! (.-onerror socket) #(rf/dispatch (conj on-error %)))
+                              (rf/dispatch (conj on-success socket))))))
+
+(rf/reg-fx :web-socket websocket-effect)
+
+;; Specs
 
 (defmulti db-status :cap/status)
 
+;; booting
+
+(defmethod db-status :booting [_]
+  (s/keys :req [:cap/status]))
+
+;; ok
+
+(s/def :cap/category (s/or :nil nil? :keyword keyword?))
+(s/def :cap/events (s/map-of :bottle/id :bottle/event))
+
 (defmethod db-status :ok [_]
   (s/keys :req [:cap/status
-                :cap/category]))
+                :cap/category
+                :cap/events]))
+
+;; error
 
 (s/def :cap/error map?)
 (s/def :cap/error-context string?)
@@ -26,79 +59,130 @@
                 :cap/error-data]
           :opt [:cap/error-event]))
 
+;; db
+
 (s/def :cap/db (s/multi-spec db-status :cap/status))
 
-(defn spec-interceptor
-  [spec f]
-  (->interceptor
-   :id :spec
-   :after (fn spec-validation
-            [context]
-            (let [event (get-coeffect context :event)
-                  db (or (get-effect context :db)
-                         (get-coeffect context :db))]
-              (if (s/valid? spec db)
-                context
-                (->> (f db event (s/explain-data spec db))
-                     (assoc-effect context :db)))))))
+;; Utility
+
+(defn fail [context data]
+  {:cap/status :error
+   :cap/error-context context
+   :cap/error-data data})
+
+;; Event Handlers
 
 (defn handle-invalid-db
   [db event data]
-  (merge db {:cap/status :error
-             :cap/error-context (str " validating db after " (first event))
-             :cap/error-event event
-             :cap/error-data data}))
+  (fail (str "Validating db after " (first event) ".") data))
 
-(def my-spec-interceptor (spec-interceptor :cap/db handle-invalid-db))
+(def custom-spec-interceptor
+  (spec-interceptor :cap/db handle-invalid-db))
+(def interceptors [rf/debug custom-spec-interceptor rf/trim-v])
 
-(def interceptors [my-spec-interceptor rf/debug])
+(defn reg-event-db [k f] (rf/reg-event-db k interceptors f))
+(defn reg-event-fx [k f] (rf/reg-event-fx k interceptors f))
 
-(def token-url "http://localhost:8001/api/tokens")
-
-(rf/reg-event-fx
+;; Fetching token
+(reg-event-fx
  :fetch-token
- interceptors
  (fn [{db :db} _]
    {:http-xhrio {:method :post
                  :uri token-url
                  :params {:bottle/username "mike"
                           :bottle/password "rocket"}
+                 :headers {"Accept" "text/plain"}
                  :format (ajax/transit-request-format)
                  :response-format (ajax/raw-response-format)
                  :on-success [:token-success]
                  :on-failure [:token-failure]}}))
 
-(rf/reg-event-db
+(reg-event-db
  :token-success
- interceptors
- (fn [db [_ token]]
+ (fn [db [token]]
    (log/debug "Retrieved token:" token)
    (assoc db :cap/token token)))
 
-(rf/reg-event-db
- :token-failure
- interceptors
- (fn [db [_ failure]]
-   {:cap/status :error
-    :cap/error-context "fetching token."
-    :cap/error-data failure}))
+;; Fetching events
 
-(rf/reg-event-db
+(reg-event-fx
+ :fetch-events
+ (fn [{db :db} _]
+   (let [token (:cap/token db)
+         category (:cap/category db)]
+     {:http-xhrio {:method :get
+                   :uri events-url
+                   :headers {"Authorization" (str "Token " token)}
+                   :format (ajax/transit-request-format)
+                   :response-format (ajax/transit-response-format)
+                   :on-success [:events-success]
+                   :on-failure [:events-failure]}})))
+
+(reg-event-db
+ :events-success
+ (fn [db [events]]
+   (log/debug "Retrieved events:" events)
+   (assoc db :cap/events events)))
+
+(reg-event-db
+ :events-failure
+ (fn [db [failure]]
+   (fail "Fetching events." failure)))
+
+;; Websocket
+;; TODO: Use boomerang.
+(defn decode
+  [message]
+  (transit/read (transit/reader :json) message))
+
+(reg-event-db
+ :event-created
+ (fn [db [message-event]]
+   (let [message (.-data message-event)
+         _ (println message)
+         event (decode message)]
+     (println "Event created:" event)
+     (update db :cap/events conj event))))
+
+(reg-event-fx
+ :connect-websocket
+ (fn [{db :db} _]
+   (let [token (:cap/token db)
+         category (:cap/category db)]
+     {:web-socket {:method :get
+                   :uri websocket-url
+                   :on-message [:event-created]
+                   :on-success [:websocket-success]
+                   :on-failure [:websocket-failure]}})))
+
+(reg-event-db
+ :websocket-success
+ (fn [db [socket]]
+   (log/debug "Connected.")
+   (assoc db :cap/websocket socket)
+   db))
+
+(reg-event-db
+ :websocket-failure
+ (fn [db [failure]]
+   (fail "Connecting websocket." {:message (str "Failed to connect to " (-> failure .-target .-url) ".")})))
+
+(reg-event-db
+ :websocket-error
+ (fn [db [failure]]
+   (fail "Websocket connection.." failure)))
+
+;; UI
+
+(reg-event-db
  :set-category
- interceptors
- (fn [db [_ category]]
+ (fn [db [category]]
    (assoc db :cap/category category)))
 
-(rf/reg-event-fx
- :fetch-events
- interceptors
- (fn [{db :db} _]
-   (let [category (:cap/category db)]
-     {:db (assoc db :events [])})))
+;; Life cycle
 
-(rf/reg-event-fx
+(reg-event-fx
  :boot
- interceptors
  (fn [{db :db} _]
    (let [url (-> js/window .-location .-href url/url)
          category (keyword (get-in url [:query "category"]))]
@@ -107,4 +191,14 @@
                            existing-category
                            category)}
       :async-flow {:first-dispatch [:fetch-token]
-                   :rules [{:when :seen-any-of? :events [:token-failure] :halt? true}]}})))
+                   :rules [{:when :seen? :events :token-success :dispatch-n [[:fetch-events] [:connect-websocket]]}
+                           {:when :seen-all-of? :events [:events-success :websocket-success] :dispatch [:start]}
+                           {:when :seen? :events :start :halt? true}
+                           {:when :seen-any-of? :events [:token-failure
+                                                         :events-failure
+                                                         :websocket-failure] :halt? true}]}})))
+
+(reg-event-db
+ :start
+ (fn [db _]
+   (assoc db :cap/status :ok)))

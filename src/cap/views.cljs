@@ -16,23 +16,24 @@
 
 (defn pretty [form] (with-out-str (cljs.pprint/pprint form)))
 
+(defn ok []
+  (let [events @(rf/subscribe [:events])]
+    (if (empty? events)
+      [:p "No events."]
+      [:ul
+       (for [event events]
+         [:li {:key (str event)} [:p (pretty event)]])])))
+
 (defn error []
   (let [error @(rf/subscribe [:error])]
-    (println "ERR:" error)
-    [:div
-     [:h1 "Error " (:cap/error-context error)]
-     (when-let [event (:cap/error-event error)]
-       [:event
-        [:h5 "Event"]
-        [:pre (pretty event)]])
-     [:h5 "Data"]
+    [:div.error
+     [:h1 "Error: " (:cap/error-context error)]
      [:pre (pretty (:cap/error-data error))]]))
 
 (defn app []
   (let [status @(rf/subscribe [:status])]
-    (println "STATUS: " status)
     (case status
-      :ok [:p "Ok!"]
+      :ok [ok]
       :booting [:p "Booting..."]
       :error [error]
       [:p "Error!"])))
