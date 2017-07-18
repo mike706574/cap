@@ -11,9 +11,9 @@
 
 ;; Config
 
-(def token-url "http://localhost:8001/api/tokens")
-(def events-url "http://localhost:8001/api/events")
-(def websocket-url "ws://localhost:8001/api/websocket")
+(def token-url "http://198.98.55.152:8001/api/tokens")
+(def events-url "http://198.98.55.152:8001/api/events")
+(def websocket-url "ws://198.98.55.152:8001/api/websocket")
 
 ;; Effects
 
@@ -27,7 +27,7 @@
                               (set! (.-onerror socket) #(rf/dispatch (conj on-error %)))
                               (rf/dispatch (conj on-success socket))))))
 
-(rf/reg-fx :web-socket websocket-effect)
+(rf/reg-fx :websocket websocket-effect)
 
 ;; Specs
 
@@ -41,7 +41,7 @@
 ;; ok
 
 (s/def :cap/category (s/or :nil nil? :keyword keyword?))
-(s/def :cap/events (s/map-of :bottle/id :bottle/event))
+(s/def :cap/events (s/coll-of :bottle/event))
 
 (defmethod db-status :ok [_]
   (s/keys :req [:cap/status
@@ -65,16 +65,21 @@
 
 ;; Utility
 
-(defn fail [context data]
-  {:cap/status :error
-   :cap/error-context context
-   :cap/error-data data})
+(defn fail
+  ([context data]
+   {:cap/status :error
+    :cap/error-context context
+    :cap/error-data data})
+  ([context data db]
+   (assoc (fail context data) :cap/db db)))
 
 ;; Event Handlers
 
 (defn handle-invalid-db
   [db event data]
-  (fail (str "Validating db after " (first event) ".") data))
+  (if (= (:cap/status db) :error)
+    db
+    (fail (str "Validating db after " (first event) ".") (assoc data :db db))))
 
 (def custom-spec-interceptor
   (spec-interceptor :cap/db handle-invalid-db))
@@ -139,7 +144,6 @@
  :event-created
  (fn [db [message-event]]
    (let [message (.-data message-event)
-         _ (println message)
          event (decode message)]
      (println "Event created:" event)
      (update db :cap/events conj event))))
@@ -149,11 +153,11 @@
  (fn [{db :db} _]
    (let [token (:cap/token db)
          category (:cap/category db)]
-     {:web-socket {:method :get
-                   :uri websocket-url
-                   :on-message [:event-created]
-                   :on-success [:websocket-success]
-                   :on-failure [:websocket-failure]}})))
+     {:websocket {:method :get
+                  :uri websocket-url
+                  :on-message [:event-created]
+                  :on-success [:websocket-success]
+                  :on-failure [:websocket-failure]}})))
 
 (reg-event-db
  :websocket-success
@@ -186,6 +190,12 @@
  (fn [{db :db} _]
    (let [url (-> js/window .-location .-href url/url)
          category (keyword (get-in url [:query "category"]))]
+     (println "Hello! I am booting now!" (println (keys db)))
+
+     (when-let [existing-websocket (:cap/websocket db)]
+       (println "Closing existing websocket!")
+
+       (.close existing-websocket))
      {:db {:cap/status :booting
            :cap/category (if-let [existing-category (:cap/category db)]
                            existing-category

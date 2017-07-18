@@ -18,17 +18,23 @@
 
 (defn ok []
   (let [events @(rf/subscribe [:events])]
+
+
     (if (empty? events)
       [:p "No events."]
       [:ul
        (for [event events]
-         [:li {:key (str event)} [:p (pretty event)]])])))
+         [:li {:key (:bottle/id event)} [:p (pretty event)]])])))
 
 (defn error []
   (let [error @(rf/subscribe [:error])]
     [:div.error
      [:h1 "Error: " (:cap/error-context error)]
-     [:pre (pretty (:cap/error-data error))]]))
+     [:pre (pretty (:cap/error-data error))]
+     (when-let [db (:cap/db error)]
+       [:div
+        [:h5 "Database:"]
+        [:pre (pretty db)]])]))
 
 (defn app []
   (let [status @(rf/subscribe [:status])]
