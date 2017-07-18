@@ -1,6 +1,7 @@
 (ns cap.events
   (:require [ajax.core :as ajax]
             [bottle.specs]
+            [cap.effects]
             [cemerick.url :as url]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
@@ -11,32 +12,20 @@
 
 ;; Config
 
-(def token-url "http://198.98.55.152:8001/api/tokens")
-(def events-url "http://198.98.55.152:8001/api/events")
-(def websocket-url "ws://198.98.55.152:8001/api/websocket")
-
-;; Effects
-
-(defn websocket-effect
-  [{:as request
-    :keys [uri on-message on-error on-success on-failure]}]
-  (let [socket (js/WebSocket. uri)]
-    (set! (.-onmessage socket) #(rf/dispatch (conj on-message %)))
-    (set! (.-onerror socket) #(rf/dispatch (conj on-failure %)))
-    (set! (.-onopen socket) (fn on-open []
-                              (set! (.-onerror socket) #(rf/dispatch (conj on-error %)))
-                              (rf/dispatch (conj on-success socket))))))
-
-(rf/reg-fx :websocket websocket-effect)
+(def token-url "http://localhost:8001/api/tokens")
+(def events-url "http://localhost:8001/api/events")
+(def websocket-url "ws://localhost:8001/api/websocket")
 
 ;; Specs
 
 (defmulti db-status :cap/status)
 
+
 ;; booting
 
 (defmethod db-status :booting [_]
   (s/keys :req [:cap/status]))
+
 
 ;; ok
 
@@ -81,6 +70,7 @@
     db
     (fail (str "Validating db after " (first event) ".") (assoc data :db db))))
 
+
 (def custom-spec-interceptor
   (spec-interceptor :cap/db handle-invalid-db))
 (def interceptors [rf/debug custom-spec-interceptor rf/trim-v])
@@ -108,6 +98,11 @@
    (log/debug "Retrieved token:" token)
    (assoc db :cap/token token)))
 
+(reg-event-db
+ :token-failure
+ (fn [db [failure]]
+   (fail "Fetching token." failure)))
+
 ;; Fetching events
 
 (reg-event-fx
@@ -118,7 +113,6 @@
      {:http-xhrio {:method :get
                    :uri events-url
                    :headers {"Authorization" (str "Token " token)}
-                   :format (ajax/transit-request-format)
                    :response-format (ajax/transit-response-format)
                    :on-success [:events-success]
                    :on-failure [:events-failure]}})))
@@ -133,6 +127,33 @@
  :events-failure
  (fn [db [failure]]
    (fail "Fetching events." failure)))
+
+;; Create event
+
+(reg-event-fx
+ :create-event
+ (fn [{db :db} [category]]
+   (let [token (:cap/token db)]
+     {:http-xhrio {:method :post
+                   :uri events-url
+                   :headers {"Authorization" (str "Token " token)}
+                   :params {:bottle/category category}
+                   :format (ajax/transit-request-format)
+                   :response-format (ajax/transit-response-format)
+                   :on-success [:manual-event-created]
+                   :on-failure [:manual-event-creation-failure]}})))
+
+(reg-event-db
+ :manual-event-created
+ (fn [db [_]]
+   (log/debug "Created manual event.")
+   db))
+
+(reg-event-db
+ :manual-event-creation-failed
+ (fn [db [failure]]
+   (fail "Failed to create manual event." failure)))
+
 
 ;; Websocket
 ;; TODO: Use boomerang.
@@ -151,20 +172,17 @@
 (reg-event-fx
  :connect-websocket
  (fn [{db :db} _]
-   (let [token (:cap/token db)
-         category (:cap/category db)]
-     {:websocket {:method :get
-                  :uri websocket-url
-                  :on-message [:event-created]
-                  :on-success [:websocket-success]
-                  :on-failure [:websocket-failure]}})))
+   {:websocket {:method :get
+                :uri websocket-url
+                :on-message [:event-created]
+                :on-success [:websocket-success]
+                :on-failure [:websocket-failure]}}))
 
 (reg-event-db
  :websocket-success
  (fn [db [socket]]
    (log/debug "Connected.")
-   (assoc db :cap/websocket socket)
-   db))
+   (assoc db :cap/websocket socket)))
 
 (reg-event-db
  :websocket-failure
@@ -184,18 +202,14 @@
    (assoc db :cap/category category)))
 
 ;; Life cycle
-
 (reg-event-fx
  :boot
  (fn [{db :db} _]
+   (when-let [websocket (:cap/websocket db)]
+     (log/info "Closing existing websocket.")
+     (.close websocket))
    (let [url (-> js/window .-location .-href url/url)
          category (keyword (get-in url [:query "category"]))]
-     (println "Hello! I am booting now!" (println (keys db)))
-
-     (when-let [existing-websocket (:cap/websocket db)]
-       (println "Closing existing websocket!")
-
-       (.close existing-websocket))
      {:db {:cap/status :booting
            :cap/category (if-let [existing-category (:cap/category db)]
                            existing-category

@@ -39,7 +39,7 @@
                    :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}}}
   :cljsbuild {:builds {:dev {:source-paths ["src"]
                              :figwheel {:on-jsload "cap.core/run"
-                                        :websocket-host "198.98.55.152"}
+                                        :websocket-host "localhost"}
                              :compiler {:output-to "resources/public/js/client.js"
                                         :output-dir "resources/public/js"
                                         :main "cap.core"

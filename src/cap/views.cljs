@@ -14,17 +14,31 @@
          [:option {:key value
                    :value value} label])])))
 
+(defn text-submit
+  [on-submit]
+  (let [value (r/atom "")]
+    (fn []
+      [:form
+       [:input {:type "text"
+                :value @value
+                :on-change  #(let [new-value (.. % -target -value)]
+                               (reset! value new-value))}]
+       [:input {:type "submit"
+                :value "Submit"
+                :on-click #(do (on-submit @value)
+                               (.preventDefault %))}]])))
+
 (defn pretty [form] (with-out-str (cljs.pprint/pprint form)))
 
 (defn ok []
   (let [events @(rf/subscribe [:events])]
-
-
-    (if (empty? events)
-      [:p "No events."]
-      [:ul
-       (for [event events]
-         [:li {:key (:bottle/id event)} [:p (pretty event)]])])))
+    [:div
+     [text-submit #(rf/dispatch [:create-event (keyword %)])]
+     (if (empty? events)
+       [:p "No events."]
+       [:ul
+        (for [event events]
+          [:li {:key (:bottle/id event)} [:p (pretty event)]])])]))
 
 (defn error []
   (let [error @(rf/subscribe [:error])]
