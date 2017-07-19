@@ -161,13 +161,19 @@
   [message]
   (transit/read (transit/reader :json) message))
 
+(defn pretty [form] (with-out-str (cljs.pprint/pprint form)))
+
 (reg-event-db
- :event-created
+ :mesage-received
  (fn [db [message-event]]
-   (let [message (.-data message-event)
-         event (decode message)]
-     (println "Event created:" event)
-     (update db :cap/events conj event))))
+   (let [message-data (.-data message-event)
+         {:as message
+          :keys [:bottle/message-type :bottle/event]} (decode message-data)]
+     (log/debug "Message received:\n" (pretty message))
+     (case message-type
+       "created" (update db :cap/events conj event)
+       "closed" db ;; TODO: Update.
+       ))))
 
 (reg-event-fx
  :connect-websocket
