@@ -12,9 +12,10 @@
 
 ;; Config
 
-(def token-url "http://localhost:8001/api/tokens")
-(def events-url "http://localhost:8001/api/events")
-(def websocket-url "ws://localhost:8001/api/websocket")
+(def host "198.98.55.152:8001")
+(def token-url (str "http://" host "/api/tokens"))
+(def events-url (str "http://" host "/api/events"))
+(def websocket-url (str "ws://" host "/api/websocket"))
 
 ;; Specs
 
